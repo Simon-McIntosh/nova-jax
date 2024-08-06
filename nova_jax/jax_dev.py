@@ -13,6 +13,8 @@ import jax.numpy as jnp
 import numpy as np
 import xarray
 
+from nova_jax import select
+
 
 def categorize_1d(data, stencil):
     """Categorize points in 1d hexagonal grid.
@@ -64,17 +66,19 @@ def _unique(nulls, decimals=3):
     return {"points": points, "psi": psi[index], "null_type": null_type[index]}
 
 
-def _subnull_1d(x_coordinate, z_coordinate, index, psi):
+def _subnull_1d(x_coordinate, z_coordinate, stencil, stencil_index, index, psi):
     """Return unique field nulls from 1d unstructured grid."""
-    stencil_index = self["stencil_index"]
     nulls = []
     for i in index:
-        stencil_vertex = self["stencil"][select.bisect(stencil_index, i)]
-        x_cluster = self["x"][stencil_vertex]
-        z_cluster = self["z"][stencil_vertex]
-        psi_cluster = psi[stencil_vertex]
-        nulls.append(select.subnull(x_cluster, z_cluster, psi_cluster))
-    return {"index": index} | _unique(nulls)
+        stencil_vertex = stencil[select.bisect(stencil_index, i)]
+        x_cluster = x_coordinate[stencil_vertex]
+        z_cluster = z_coordinate[stencil_vertex]
+        jax.debug.print("x_cluster {x_cluster}", x_cluster=x_cluster)
+        jax.debug.print("z_cluster {z_cluster}", z_cluster=z_cluster)
+
+        # psi_cluster = psi[stencil_vertex]
+        # nulls.append(select.subnull(x_cluster, z_cluster, psi_cluster))
+    # return {"index": index} | _unique(nulls)
 
 
 plasmagrid = xarray.open_dataset("plasmagrid.nc")
@@ -109,6 +113,16 @@ assert np.allclose(levelset.Psi, dpsi_dI)
 o_mask, x_mask = categorize_1d(psi_plasma(currents), plasmagrid.stencil.data)
 index, points = _index_1d(plasmagrid.x, plasmagrid.z, o_mask)
 
+_subnull_1d(
+    plasmagrid.x.data,
+    plasmagrid.z.data,
+    plasmagrid.stencil.data,
+    plasmagrid.stencil_index.data,
+    index,
+    psi_plasma(currents),
+)
+
+
 plt.figure(figsize=(5, 9))
 contour = plt.contour(
     levelset.x,
@@ -142,6 +156,19 @@ plt.triplot(
 
 
 plt.plot(plasmagrid.x[o_mask], plasmagrid.z[o_mask], "r.")
+plt.plot(
+    [6.364922, 6.266436, 6.364922, 6.4634085, 6.4634085, 6.364922, 6.266436],
+    [
+        0.49910745,
+        0.55596846,
+        0.61282945,
+        0.55596846,
+        0.44224647,
+        0.38538548,
+        0.44224647,
+    ],
+    "C0.",
+)
 
 
 plt.axis("equal")

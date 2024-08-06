@@ -1,8 +1,10 @@
 """Manage selection algorithms."""
 
+import jax
 import jax.numpy as jnp
 
 
+@jax.jit
 def bisect(vector, value):
     """Return the bisect left index, assuming vector is sorted.
 
@@ -11,13 +13,19 @@ def bisect(vector, value):
 
     Addapted from bisect.bisect_left to enable jit compilation.
     """
-    low, high = 0, len(vector)
-    while low < high:
+
+    def cond(val):
+        low, high = val
+        return low < high
+
+    def body(val):
+        low, high = val
         mid = (low + high) // 2
-        if vector[mid] < value:
-            low = mid + 1
-        else:
-            high = mid
+        low = jnp.where(vector[mid] < value, mid + 1, low)
+        high = jnp.where(vector[mid] >= value, mid, high)
+        return [low, high]
+
+    low, high = jax.lax.while_loop(cond, body, [0, len(vector)])
     return low
 
 

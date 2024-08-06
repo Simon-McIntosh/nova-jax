@@ -45,6 +45,38 @@ def categorize_1d(data, stencil):
     return o_mask, x_mask
 
 
+def _index_1d(x_coordinate, z_coordinate, mask):
+    index = jnp.where(mask)[0]
+    point_number = len(index)
+    points = jnp.zeros((point_number, 2), dtype=float)
+    for i in range(point_number):  # pylint: disable=not-an-iterable
+        points = points.at[i, 0].set(x_coordinate[index[i]])
+        points = points.at[i, 1].set(z_coordinate[index[i]])
+    return index, points
+
+
+def _unique(nulls, decimals=3):
+    """Return unique field nulls."""
+    points = jnp.array([null[0] for null in nulls])
+    psi = jnp.array([null[1] for null in nulls])
+    null_type = np.array([null[2] for null in nulls])
+    points, index = np.unique(points.round(decimals), axis=0, return_index=True)
+    return {"points": points, "psi": psi[index], "null_type": null_type[index]}
+
+
+def _subnull_1d(x_coordinate, z_coordinate, index, psi):
+    """Return unique field nulls from 1d unstructured grid."""
+    stencil_index = self["stencil_index"]
+    nulls = []
+    for i in index:
+        stencil_vertex = self["stencil"][select.bisect(stencil_index, i)]
+        x_cluster = self["x"][stencil_vertex]
+        z_cluster = self["z"][stencil_vertex]
+        psi_cluster = psi[stencil_vertex]
+        nulls.append(select.subnull(x_cluster, z_cluster, psi_cluster))
+    return {"index": index} | _unique(nulls)
+
+
 plasmagrid = xarray.open_dataset("plasmagrid.nc")
 levelset = data = xarray.open_dataset("levelset.nc")
 data = xarray.open_dataset("data.nc")
@@ -74,9 +106,8 @@ assert np.allclose(levelset.Psi, dpsi_dI)
 
 # dpsi_dI = jax.grad(psi)
 
-
 o_mask, x_mask = categorize_1d(psi_plasma(currents), plasmagrid.stencil.data)
-
+index, points = _index_1d(plasmagrid.x, plasmagrid.z, o_mask)
 
 plt.figure(figsize=(5, 9))
 contour = plt.contour(
@@ -85,6 +116,17 @@ contour = plt.contour(
     psi(currents).reshape(levelset.sizes["x"], levelset.sizes["z"]).T,
     levels=71,
     colors="gray",
+    linestyles="solid",
+    linewidths=1.5,
+)
+
+plt.tricontour(
+    plasmagrid.x,
+    plasmagrid.z,
+    plasmagrid.triangles,
+    psi_plasma(currents),
+    levels=contour.levels,
+    colors="C0",
     linestyles="solid",
     linewidths=1.5,
 )
@@ -98,16 +140,6 @@ plt.triplot(
     alpha=0.2,
 )
 
-plt.tricontour(
-    plasmagrid.x,
-    plasmagrid.z,
-    plasmagrid.triangles,
-    psi_plasma(currents),
-    levels=contour.levels,
-    colors="C0",
-    linestyles="solid",
-    linewidths=1.5,
-)
 
 plt.plot(plasmagrid.x[o_mask], plasmagrid.z[o_mask], "r.")
 

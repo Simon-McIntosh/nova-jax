@@ -1,11 +1,8 @@
 """Manage selection algorithms."""
 
-import numpy as np
-
-from nova import njit
+import jax.numpy as jnp
 
 
-@njit(cache=True)
 def bisect(vector, value):
     """Return the bisect left index, assuming vector is sorted.
 
@@ -24,7 +21,6 @@ def bisect(vector, value):
     return low
 
 
-@njit(cache=True)
 def bisect_right(vector, value):
     """Return the bisect right index, assuming vector is sorted.
 
@@ -43,52 +39,46 @@ def bisect_right(vector, value):
     return low
 
 
-@njit(cache=True)
 def bisect_2d(vector, value):
     """Return vector of bisection values."""
     number = len(value)
-    index = np.zeros(number, dtype=np.int16)
-    for i in np.arange(number):
+    index = jnp.zeros(number, dtype=jnp.int16)
+    for i in jnp.arange(number):
         index[i] = bisect_right(vector, value[i])
     return index
 
 
-@njit(cache=True)
 def length_2d(x_coordinate, z_coordinate):
     """Return the cumalative length of a 2d polyline."""
-    points = np.column_stack((x_coordinate, z_coordinate))
-    delta = np.sqrt(np.sum((points[1:] - points[:-1]) ** 2, axis=1))
-    return np.append(0, delta.cumsum())
+    points = jnp.column_stack((x_coordinate, z_coordinate))
+    delta = jnp.sqrt(jnp.sum((points[1:] - points[:-1]) ** 2, axis=1))
+    return jnp.append(0, delta.cumsum())
 
 
-@njit(cache=True)
 def quadratic_wall(w_cluster, psi_cluster):
     """Return psi quatratic coefficients."""
-    coefficient_matrix = np.column_stack(
-        (w_cluster**2, w_cluster, np.ones_like(w_cluster))
+    coefficient_matrix = jnp.column_stack(
+        (w_cluster**2, w_cluster, jnp.ones_like(w_cluster))
     )
-    coefficients = np.linalg.lstsq(coefficient_matrix, psi_cluster)[0]
+    coefficients = jnp.linalg.lstsq(coefficient_matrix, psi_cluster)[0]
     return coefficients
 
 
-@njit(cache=True)
 def wall_length(coef):
     """Return location of wall null."""
     return -coef[1] / (2 * coef[0])
 
 
-@njit(cache=True)
 def wall_coordinate(w_coordinate, x_cluster, z_cluster, w_cluster):
     """Return wall coordinates."""
-    x_coordinate = np.interp(w_coordinate, w_cluster, x_cluster)
-    z_coordinate = np.interp(w_coordinate, w_cluster, z_cluster)
+    x_coordinate = jnp.interp(w_coordinate, w_cluster, x_cluster)
+    z_coordinate = jnp.interp(w_coordinate, w_cluster, z_cluster)
     return x_coordinate, z_coordinate
 
 
-@njit(cache=True)
 def wall_index(psi_wall):
     """Return cluster index and roll."""
-    index = np.argmax(psi_wall)
+    index = jnp.argmax(psi_wall)
     if index == 0:
         return index + 1, 1
     if index == len(psi_wall) - 1:
@@ -96,16 +86,15 @@ def wall_index(psi_wall):
     return index, 0
 
 
-@njit(cache=True)
 def wall_flux(x_wall, z_wall, psi_wall, polarity=1):
     """Return sub-panel wall flux coordinates and value."""
     if polarity == 0:  # zero plasma current
         return 0, 0, 0
     index, roll = wall_index(polarity * psi_wall)
     if roll != 0:
-        x_wall = np.roll(x_wall, roll)
-        z_wall = np.roll(z_wall, roll)
-        psi_wall = np.roll(psi_wall, roll)
+        x_wall = jnp.roll(x_wall, roll)
+        z_wall = jnp.roll(z_wall, roll)
+        psi_wall = jnp.roll(psi_wall, roll)
     x_cluster = x_wall[index - 1 : index + 2]
     z_cluster = z_wall[index - 1 : index + 2]
     psi_cluster = psi_wall[index - 1 : index + 2]
@@ -119,24 +108,22 @@ def wall_flux(x_wall, z_wall, psi_wall, polarity=1):
     return x_coordinate, z_coordinate, psi
 
 
-@njit(cache=True)
 def quadratic_surface(x_cluster, z_cluster, psi_cluster):
     """Return psi quatratic surface coefficients."""
-    coefficient_matrix = np.column_stack(
+    coefficient_matrix = jnp.column_stack(
         (
             x_cluster**2,
             z_cluster**2,
             x_cluster,
             z_cluster,
             x_cluster * z_cluster,
-            np.ones_like(x_cluster),
+            jnp.ones_like(x_cluster),
         )
     )
-    coefficients = np.linalg.lstsq(coefficient_matrix, psi_cluster)[0]
+    coefficients = jnp.linalg.lstsq(coefficient_matrix, psi_cluster)[0]
     return coefficients
 
 
-@njit(cache=True)
 def null_type(coefficients, atol=1e-12):
     """Return null type.
 
@@ -164,7 +151,6 @@ def null_type(coefficients, atol=1e-12):
     raise ValueError("Coefficients form a degenerate surface.")
 
 
-@njit(cache=True)
 def null_coordinate(coefficients, cluster=None):
     """
     Return null coodinates in 2D plane.
@@ -190,18 +176,17 @@ def null_coordinate(coefficients, cluster=None):
     ) / root
     if cluster is not None:
         for i, coord in enumerate([x_coordinate, z_coordinate]):
-            maximum, minimum = np.max(cluster[i]), np.min(cluster[i])
+            maximum, minimum = jnp.max(cluster[i]), jnp.min(cluster[i])
             delta = maximum - minimum
             assert coord >= minimum - 2 * delta
             assert coord <= maximum + 2 * delta
     return x_coordinate, z_coordinate
 
 
-@njit(cache=True)
 def null(coef, coords):
     """Return null poloidal flux."""
     return (
-        np.array(
+        jnp.array(
             [
                 coords[0] ** 2,
                 coords[1] ** 2,

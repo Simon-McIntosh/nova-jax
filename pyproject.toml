@@ -1,0 +1,16 @@
+[project]
+name = "nova-jax"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Simon McIntosh",email = "simon.mcintosh@iter.org"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

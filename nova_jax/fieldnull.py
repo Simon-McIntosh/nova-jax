@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from functools import cached_property, partial
+from functools import cached_property
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,15 +11,6 @@ import xarray
 
 from nova_jax.array import Array
 from nova_jax.categorize import Null
-from nova_jax import select
-
-"""
-from nova import njit
-from nova.biot.array import Array
-from nova.graphics.plot import Plot
-from nova.geometry import select
-from nova.geometry.pointloop import PointLoop
-"""
 
 
 @dataclass
@@ -67,7 +58,7 @@ class FieldNull(Array):
 
     def update_null(self, psi):
         """Update null points."""
-        nulls = self.null.update(psi)
+        return self.null.update(psi)
         # nulls = nulls[number]
         # print(nulls)
 
@@ -156,10 +147,12 @@ if __name__ == "__main__":
     levelset = xarray.open_dataset("levelset.nc")
     data = xarray.open_dataset("data.nc")
 
+    @jax.jit
     def psi_plasma(currents):
         """Return plasmagrid flux map."""
         return jnp.matmul(plasmagrid.Psi.data, currents)
 
+    @jax.jit
     def psi_levelset(currents):
         """Return levelset flux map."""
         return jnp.matmul(levelset.Psi.data, currents)
@@ -211,6 +204,7 @@ if __name__ == "__main__":
     o_point = fieldnull.coordinate_stencil[979][0]
     plt.plot(*o_point, "C3o")
 
+    # @jax.jit
     def o_point(currents, item):
         psi = psi_levelset(currents)
         return fieldnull.null.o_point(psi, item)
@@ -227,11 +221,11 @@ if __name__ == "__main__":
     coil_index = 2
     Io = currents[coil_index]
 
-    I = np.copy(currents)
+    I_dynamic = np.copy(currents)
     for i, fact in enumerate(factor):
-        I[coil_index] = fact * Io
-        radius[i] = np.asarray(o_point(I, 0))
-        gradient[i] = np.asarray(d_o_point(I, 0))[coil_index]
+        I_dynamic[coil_index] = fact * Io
+        radius[i] = np.asarray(o_point(I_dynamic, 0))
+        gradient[i] = np.asarray(d_o_point(I_dynamic, 0))[coil_index]
         # curve[i] = np.asarray(dd_o_point(currents, 0))[coil_index]
 
     axes = plt.subplots(2, 1, figsize=(9, 7), sharex=True)[1]

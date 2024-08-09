@@ -167,9 +167,9 @@ if __name__ == "__main__":
     psi_1d = psi_plasma(currents)
     psi_2d = psi_levelset(currents)
 
-    fieldnull = FieldNull(data=levelset, maxsize=2)
+    fieldnull = FieldNull(data=plasmagrid, maxsize=2)
 
-    fieldnull.update_null(psi_2d)
+    fieldnull.update_null(psi_1d)
 
     # print(fieldnull.o_points)
     """
@@ -201,12 +201,13 @@ if __name__ == "__main__":
     plt.axis("equal")
     plt.axis("off")
 
-    o_point = fieldnull.coordinate_stencil[979][0]
-    plt.plot(*o_point, "C3o")
+    plt.plot(
+        fieldnull.null.o_point(psi_1d, 0), fieldnull.null.o_point(psi_1d, 1), "C3o"
+    )
 
     # @jax.jit
     def o_point(currents, item):
-        psi = psi_levelset(currents)
+        psi = psi_plasma(currents)
         return fieldnull.null.o_point(psi, item)
 
     d_o_point = jax.jacfwd(o_point)

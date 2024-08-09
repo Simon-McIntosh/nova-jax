@@ -232,4 +232,4 @@ def subnull(cluster):
     ntype = null_type(coef)
     coords = null_coordinate(coef, cluster[:2])
     psi = null(coef, coords)
-    return jnp.r_[ntype, psi, coords]
+    return jnp.r_[coords, psi, ntype]

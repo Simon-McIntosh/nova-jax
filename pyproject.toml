@@ -25,4 +25,5 @@ spyder = "^5.5.5"
 matplotlib = "^3.9.0"
 pyqt5-qt5 = "<=5.15.10"
 pyqtwebengine-qt5 = "<=5.15.10"
+seaborn = "^0.13.2"
 

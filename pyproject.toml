@@ -28,4 +28,5 @@ pyqtwebengine-qt5 = "<=5.15.10"
 seaborn = "^0.13.2"
 pre-commit = "^3.8.0"
 ruff = "^0.5.7"
+pytest = "^8.3.2"
 

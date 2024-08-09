@@ -2,18 +2,27 @@
 
 from dataclasses import dataclass, field
 
+from functools import cached_property, partial
+import jax
+import jax.numpy as jnp
 import numpy as np
 import xarray
 
+from nova_jax.array import Array
+from nova_jax.categorize import Null
+from nova_jax import select
+
+"""
 from nova import njit
 from nova.biot.array import Array
 from nova.graphics.plot import Plot
 from nova.geometry import select
 from nova.geometry.pointloop import PointLoop
+"""
 
 
 @dataclass
-class DataNull(Plot, Array):
+class DataNull(Array):
     """Store sort and remove field nulls."""
 
     subgrid: bool = True
@@ -32,7 +41,7 @@ class DataNull(Plot, Array):
 
     def update_mask(self, mask, psi):
         """Return masked point data dict."""
-        if len(psi.shape) == 1:
+        if psi.ndim == 1:
             return self.update_mask_1d(mask, psi)
         return self.update_mask_2d(mask, psi)
 
@@ -81,8 +90,12 @@ class DataNull(Plot, Array):
         points = np.array([null[0] for null in nulls])
         psi = np.array([null[1] for null in nulls])
         null_type = np.array([null[2] for null in nulls])
-        points, index = np.unique(points.round(decimals), axis=0, return_index=True)
-        return {"points": points, "psi": psi[index], "null_type": null_type[index]}
+        _, index = np.unique(points.round(decimals), axis=0, return_index=True)
+        return {
+            "points": points[index],
+            "psi": psi[index],
+            "null_type": null_type[index],
+        }
 
     def _subnull_1d(self, index, psi):
         """Return unique field nulls from 1d unstructured grid."""
@@ -110,23 +123,21 @@ class DataNull(Plot, Array):
         return dict(index=index) | self._unique(nulls)
 
     @staticmethod
-    @njit(cache=True)
     def _index_1d(x_coordinate, z_coordinate, mask):
         index = np.where(mask)[0]
         point_number = len(index)
         points = np.empty((point_number, 2), dtype=np.float64)
-        for i in range(point_number):  # pylint: disable=not-an-iterable
+        for i in range(point_number):
             points[i, 0] = x_coordinate[index[i]]
             points[i, 1] = z_coordinate[index[i]]
         return index, points
 
     @staticmethod
-    @njit(cache=True)
     def _index_2d(x_coordinate, z_coordinate, mask):
         index = np.asarray(list(zip(*np.where(mask))))
         point_number = len(index)
         points = np.empty((point_number, 2), dtype=np.float64)
-        for i in range(point_number):  # pylint: disable=not-an-iterable
+        for i in range(point_number):
             points[i, 0] = x_coordinate[index[i][0]]
             points[i, 1] = z_coordinate[index[i][1]]
         return index, points
@@ -191,96 +202,127 @@ class FieldNull(DataNull):
         """Return x-point number."""
         return len(self.x_psi)
 
-    def update_null(self, psi):
-        """Update calculation of field nulls."""
-        mask_o, mask_x = self.categorize(psi)
-        super().update_masks(mask_o, mask_x, psi)
+    @cached_property
+    def stencil(self):
+        """Return grid stencil."""
+        if "stencil" in self.data:
+            return self.data["stencil"].data
+        patch = np.array([(0, 0), (-1, 0), (0, -1), (1, -1), (1, 0), (0, 1), (-1, 1)])
+        return np.ravel_multi_index(
+            np.indices((self.data.sizes["x"] - 2, self.data.sizes["z"] - 2)).reshape(
+                2, -1, 1
+            )
+            + 1
+            + patch.T[:, np.newaxis],
+            (self.data.sizes["x"], self.data.sizes["z"]),
+        )
 
-    def categorize(self, psi):
-        """Return o-point and x-point masks from loop sign counts."""
-        if len(psi.shape) == 1:
-            return self.categorize_1d(psi, self.data.stencil.data)
-        return self.categorize_2d(psi)
+    @cached_property
+    def coordinate_stencil(self):
+        """Return stencil geometry."""
+        if "stencil" in self.data:  # unstructured grid
+            return np.c_[self.data.x, self.data.z][self.stencil]
+        return np.c_[
+            self.data.x2d.data.ravel(),
+            self.data.z2d.data.ravel(),
+        ][self.stencil]
 
-    @staticmethod
-    @njit(cache=True)
-    def categorize_1d(data, stencil):
-        """Categorize points in 1d hexagonal grid.
-
-        Count number of sign changes whilst traversing neighbour point loop.
-
-            - 0: minima / maxima point
-            - 2: regular point
-            - 4: saddle point
-
-        From On detecting all saddle points in 2D images, A. Kuijper
-
-        """
-        npoint = len(data)
-        o_mask = np.full(npoint, False)
-        x_mask = np.full(npoint, False)
-        for index in stencil:
-            center = data[index[0]]
-            sign = data[index[-1]] > center
-            count = 0
-            for k in range(1, 7):
-                _sign = data[index[k]] > center
-                if _sign != sign:
-                    count += 1
-                    sign = _sign
-            if count == 0:
-                o_mask[index[0]] = True
-            if count == 4:
-                x_mask[index[0]] = True
-        return o_mask, x_mask
-
-    @staticmethod
-    @njit(cache=True)
-    def categorize_2d(data):
-        """Categorize points in 2D rectangular grid.
-
-        Count number of sign changes whilst traversing neighbour point loop.
-
-            - 0: minima / maxima point
-            - 2: regular point
-            - 4: saddle point
-
-        From On detecting all saddle points in 2D images, A. Kuijper
-
-        """
-        xdim, zdim = data.shape
-        o_mask = np.full((xdim, zdim), False)
-        x_mask = np.full((xdim, zdim), False)
-        stencil = [(-1, 0), (0, -1), (1, -1), (1, 0), (0, 1), (-1, 1)]
-        for i in range(1, xdim - 1):  # pylint: disable=not-an-iterable
-            for j in range(1, zdim - 1):
-                center = data[i, j]
-                sign = data[i + stencil[-1][0], j + stencil[-1][1]] > center
-                count = 0
-                #  use 6-point stencil
-                for k in stencil:
-                    _sign = data[i + k[0], j + k[1]] > center
-                    if _sign != sign:
-                        count += 1
-                        sign = _sign
-                if count == 0:
-                    o_mask[i, j] = True
-                if count == 4:
-                    x_mask[i, j] = True
-        return o_mask, x_mask
+    # def update_mask(self):
+    #    return {"index": index, "points": points, "psi": psi[index]}
 
 
 if __name__ == "__main__":
-    from nova.frame.coilset import CoilSet
 
-    coilset = CoilSet(dcoil=0.5)
-    coilset.coil.insert(5, [-2, 2], 0.75, 0.75)
-    coilset.coil.insert(7.8, 0, 0.75, 0.75, label="Xcoil")
-    coilset.firstwall.insert(dict(o=(4, 0, 0.5)), delta=0.3)
-    coilset.grid.solve(500, 0.05)
-    coilset.sloc["Ic"] = -15e6
+    import matplotlib.pyplot as plt
 
-    coilset.plot()
-    coilset.grid.plot()
+    plasmagrid = xarray.open_dataset("plasmagrid.nc")
+    levelset = xarray.open_dataset("levelset.nc")
+    data = xarray.open_dataset("data.nc")
 
-    # coilset.grid.plot(levels=np.sort(coilset.grid.x_psi))
+    def psi_plasma(currents):
+        """Return plasmagrid flux map."""
+        return np.matmul(plasmagrid.Psi.data, currents)
+
+    def psi_levelset(currents):
+        """Return levelset flux map."""
+        return np.matmul(levelset.Psi.data, currents)
+
+    itime = 20
+
+    current = data.current[itime]
+    passive_current = data.passive_current[itime]
+    plasma_current = data.ip[itime]
+    currents = np.r_[current, passive_current, plasma_current]
+
+    psi_1d = psi_plasma(currents)
+    psi_2d = psi_levelset(currents)
+
+    fieldnull = FieldNull(data=levelset)
+
+    null = Null(fieldnull.stencil, fieldnull.coordinate_stencil, 2)
+
+    print(null.update(psi_2d))
+    """
+
+    def o_point_r(psi_2d):
+        fieldnull.update_null(psi_2d)
+        return fieldnull.o_points[0][0]
+    """
+
+    plt.figure(figsize=(5, 9))
+
+    plt.triplot(
+        plasmagrid.x,
+        plasmagrid.z,
+        plasmagrid.triangles,
+        lw=1.5,
+        color="C0",
+        alpha=0.2,
+    )
+
+    plt.tricontour(
+        plasmagrid.x,
+        plasmagrid.z,
+        plasmagrid.triangles,
+        psi_plasma(currents),
+        levels=71,
+        colors="C0",
+        linestyles="solid",
+        linewidths=1.5,
+    )
+    plt.axis("equal")
+    plt.axis("off")
+
+    """
+
+
+    (o_point_number, x_point_number), count = categorize_1d(psi_1d, stencil)
+
+    plt.plot(plasmagrid.x[o_mask], plasmagrid.z[o_mask], "r.")
+
+    o_mask, x_mask = categorize_2d(psi_2d)
+    plt.plot(levelset.x2d.data[o_mask], levelset.z2d.data[o_mask], "r.")
+    plt.plot(levelset.x2d.data[x_mask], levelset.z2d.data[x_mask], "rx")
+
+    plt.tricontour(
+        plasmagrid.x,
+        plasmagrid.z,
+        plasmagrid.triangles,
+        psi_plasma(currents),
+        levels=71,
+        colors="C0",
+        linestyles="solid",
+        linewidths=1.5,
+    )
+
+    plt.triplot(
+        plasmagrid.x,
+        plasmagrid.z,
+        plasmagrid.triangles,
+        lw=1.5,
+        color="C0",
+        alpha=0.2,
+    )
+
+
+    """

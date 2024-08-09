@@ -6,17 +6,17 @@ Created on Tue Aug  6 11:01:45 2024
 @author: mcintos
 """
 
-import matplotlib.pyplot as plt
-
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray
 
 from nova_jax import select
 
 
-def categorize_1d(data, stencil):
+@jax.jit
+def _categorize_1d(data, stencil):
     """Categorize points in 1d hexagonal grid.
 
     Count number of sign changes whilst traversing neighbour point loop.
@@ -31,20 +31,48 @@ def categorize_1d(data, stencil):
     npoint = len(data)
     o_mask = jnp.full(npoint, False)
     x_mask = jnp.full(npoint, False)
+
+    def stencil_index(i, val):
+        o_mask, x_mask = val
+        index = stencil[i]
+        center = data[index[0]]
+
+        def stencil_vertex(k, val):
+            sign, count = val
+            _sign = data[index[k]] > center
+            sign_change = _sign != sign
+            count = jnp.where(sign_change, count + 1, count)
+            sign = jnp.where(sign_change, _sign, sign)
+            return [sign, count]
+
+        sign = data[index[-1]] > center
+        count = jax.lax.fori_loop(1, 7, stencil_vertex, [sign, 0])[1]
+        o_mask = o_mask.at[index[0]].set(count == 0)
+        x_mask = x_mask.at[index[0]].set(count == 4)
+        return [o_mask, x_mask]
+
+    return jax.lax.fori_loop(0, len(stencil), stencil_index, [o_mask, x_mask])
+
+    """
     for index in stencil:
         center = data[index[0]]
         sign = data[index[-1]] > center
         count = 0
         for k in range(1, 7):
             _sign = data[index[k]] > center
-            if _sign != sign:
-                count += 1
-                sign = _sign
-        if count == 0:
-            o_mask = o_mask.at[index[0]].set(True)
-        if count == 4:
-            x_mask = x_mask.at[index[0]].set(True)
+            sign_change = _sign != sign
+            count = jnp.where(sign_change, count + 1, count)
+            sign = jnp.where(sign_change, _sign, sign)
+            # if _sign != sign:
+            #    count += 1
+            #    sign = _sign
+        # jnp.where(count == 0)
+        # if count == 0:
+        o_mask = o_mask.at[index[0]].set(count == 0)
+        # if count == 4:
+        x_mask = x_mask.at[index[0]].set(count == 4)
     return o_mask, x_mask
+    """
 
 
 def _index_1d(x_coordinate, z_coordinate, mask):
@@ -109,7 +137,6 @@ dpsi_dI = jax.jacfwd(psi)(currents)
 assert np.allclose(levelset.Psi, dpsi_dI)
 
 # dpsi_dI = jax.grad(psi)
-
 o_mask, x_mask = categorize_1d(psi_plasma(currents), plasmagrid.stencil.data)
 index, points = _index_1d(plasmagrid.x, plasmagrid.z, o_mask)
 
@@ -154,22 +181,7 @@ plt.triplot(
     alpha=0.2,
 )
 
-
 plt.plot(plasmagrid.x[o_mask], plasmagrid.z[o_mask], "r.")
-plt.plot(
-    [6.364922, 6.266436, 6.364922, 6.4634085, 6.4634085, 6.364922, 6.266436],
-    [
-        0.49910745,
-        0.55596846,
-        0.61282945,
-        0.55596846,
-        0.44224647,
-        0.38538548,
-        0.44224647,
-    ],
-    "C0.",
-)
-
 
 plt.axis("equal")
 plt.axis("off")

@@ -116,6 +116,7 @@ def wall_flux(x_wall, z_wall, psi_wall, polarity=1):
     return x_coordinate, z_coordinate, psi
 
 
+@jax.jit
 def quadratic_surface(x_cluster, z_cluster, psi_cluster):
     """Return psi quatratic surface coefficients."""
     coefficient_matrix = jnp.column_stack(
@@ -132,14 +133,23 @@ def quadratic_surface(x_cluster, z_cluster, psi_cluster):
     return coefficients
 
 
+def _check_ntype(ntype):
+    """Raise null type errors."""
+    if ntype == -10:
+        raise ValueError("Plane surface")
+    if ntype == -11:
+        raise ValueError("Coefficients form a degenerate surface.")
+
+
+@jax.jit
 def null_type(coefficients, atol=1e-12):
     """Return null type.
 
         - 0: saddle
             :math:`4AB - E^2 < 0`
-        - -1: minimum
+        - 1: minimum
             :math:`A>0` and :math:`B>0`
-        - 1: maximum
+        - 2: maximum
             :math:`A<0` and :math:`B<0`
 
     Raises
@@ -148,17 +158,17 @@ def null_type(coefficients, atol=1e-12):
         degenerate surface
     """
     root = 4 * coefficients[0] * coefficients[1] - coefficients[4] ** 2
-    if abs(root) < atol:
-        raise ValueError("Plane surface")
-    if root < 0:
-        return 0
-    if coefficients[0] > 0 and coefficients[1] > 0:
-        return -1
-    if coefficients[0] < 0 and coefficients[1] < 0:
-        return 1
-    raise ValueError("Coefficients form a degenerate surface.")
+    condlist = [
+        abs(root) < atol,
+        root < 0,
+        (coefficients[0] > 0) & (coefficients[1] > 0),
+        (coefficients[0] < 0) & (coefficients[1] < 0),
+    ]
+    choicelist = [-1, 0, 1, 2]
+    return jax.numpy.select(condlist, choicelist, default=-11)
 
 
+@jax.jit
 def null_coordinate(coefficients, cluster=None):
     """
     Return null coodinates in 2D plane.
@@ -185,12 +195,13 @@ def null_coordinate(coefficients, cluster=None):
     if cluster is not None:
         for i, coord in enumerate([x_coordinate, z_coordinate]):
             maximum, minimum = jnp.max(cluster[i]), jnp.min(cluster[i])
-            delta = maximum - minimum
-            assert coord >= minimum - 2 * delta
-            assert coord <= maximum + 2 * delta
+            delta = maximum - minimum  # TODO reimplement error checking
+            # assert coord >= minimum - 2 * delta
+            # assert coord <= maximum + 2 * delta
     return x_coordinate, z_coordinate
 
 
+@jax.jit
 def null(coef, coords):
     """Return null poloidal flux."""
     return (
@@ -208,10 +219,17 @@ def null(coef, coords):
     )
 
 
-def subnull(x_cluster, z_cluster, psi_cluster):
-    """Return subgrid null coordinates, value, and type."""
-    coef = quadratic_surface(x_cluster, z_cluster, psi_cluster)
-    _type = null_type(coef)
-    coords = null_coordinate(coef, (x_cluster, z_cluster))
+@jax.jit
+def subnull(cluster):
+    """Return subgrid null coordinates, value, and type.
+
+    Parameters
+    ----------
+    cluster: jnp.ndarray (3, N)
+        Cluster coordinates and flux values [x, z, psi].
+    """
+    coef = quadratic_surface(*cluster)
+    ntype = null_type(coef)
+    coords = null_coordinate(coef, cluster[:2])
     psi = null(coef, coords)
-    return coords, psi, _type
+    return jnp.r_[ntype, psi, coords]

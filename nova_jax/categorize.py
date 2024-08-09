@@ -64,7 +64,6 @@ class Null:
 
         def cluster(_, null_type):
             index = jnp.where((count == null_type), size=self.maxsize)[0]
-            jax.debug.print("{index}", index=index)
             return (
                 _,
                 jnp.c_[
@@ -81,11 +80,11 @@ class Null:
         def subnull(carry, cluster):
             carry += 1
             return carry, jnp.where(
-                carry <= number, select.subnull(cluster.T), jnp.array([-1, 0, 0, 0])
+                carry <= number, select.subnull(cluster.T), jnp.nan * jnp.ones(4)
             )
 
-        nulls = jax.lax.scan(subnull, 0, cluster)[1]
-        return {"points": nulls[:, :2], "psi": nulls[:, 2], "null_type": nulls[:, 3]}
+        return jax.lax.scan(subnull, 0, cluster)[1]
+        # return {"points": nulls[:, :2], "psi": nulls[:, 2], "null_type": nulls[:, 3]}
 
     @partial(jax.jit, static_argnums=2)
     def o_point(self, psi, item):

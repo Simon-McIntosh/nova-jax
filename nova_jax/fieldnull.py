@@ -205,10 +205,37 @@ if __name__ == "__main__":
         fieldnull.null.o_point(psi_1d, 0), fieldnull.null.o_point(psi_1d, 1), "C3o"
     )
 
-    # @jax.jit
-    def o_point(currents, item):
-        psi = psi_plasma(currents)
-        return fieldnull.null.o_point(psi, item)
+    @dataclass
+    @jax.tree_util.register_pytree_node_class
+    class Operate:
+        """Locate and label field nulls on structured and unstructured grids."""
+
+        Psi: jnp.ndarray
+
+        def tree_flatten(self):
+            """Return flattened pytree."""
+            children = (self.Psi,)
+            aux_data = {}
+            return (children, aux_data)
+
+        @classmethod
+        def tree_unflatten(cls, aux_data, children):
+            """Return unflattened pytree."""
+            return cls(*children, **aux_data)
+
+        @jax.jit
+        def psi(self, currents):
+            return jnp.matmul(self.Psi, currents)
+
+    opp = Operate(plasmagrid.Psi.data)
+
+    Psi = plasmagrid.Psi.data
+    null = fieldnull.null
+
+    @jax.jit
+    def o_point(currents):
+        psi = jnp.matmul(Psi, currents)
+        return null.update(psi)[0][0, 0]
 
     d_o_point = jax.jacfwd(o_point)
     dd_o_point = jax.jacfwd(d_o_point)

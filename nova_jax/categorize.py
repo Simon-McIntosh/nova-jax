@@ -15,7 +15,7 @@ class Null:
 
     stencil: jnp.ndarray
     coordinate_stencil: jnp.ndarray
-    maxsize: int = 20
+    maxsize: int = 5
 
     def tree_flatten(self):
         """Return flattened pytree."""
